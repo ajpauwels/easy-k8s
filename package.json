@@ -1,6 +1,6 @@
 {
 	"name": "easy-k8s",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"description": "Wrapper lib for kubernetes-client that provides cluster API version management/mapping and a couple util functions to simplify the request building process.",
 	"main": "client.js",
 	"engines": {
@@ -19,7 +19,7 @@
 		"client"
 	],
 	"author": "Alexandre Pauwels",
-	"license": "Apache-2.0",
+	"license": "MIT",
 	"bugs": {
 		"url": "https://github.com/ajpauwels/easy-k8s/issues"
 	},
