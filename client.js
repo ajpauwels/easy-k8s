@@ -59,10 +59,6 @@ module.exports.extractCurrentContext = (kubeconfigFile) => {
 		}
 	}
 
-	if (!cluster) {
-		return undefined;
-	}
-
 	const userName = context.context.user;
 
 	let user;
@@ -74,10 +70,6 @@ module.exports.extractCurrentContext = (kubeconfigFile) => {
 				break;
 			}
 		}
-	}
-
-	if (!user) {
-		return undefined;
 	}
 
 	return {
@@ -93,15 +85,15 @@ module.exports.extractCurrentContext = (kubeconfigFile) => {
  *
  * @param {Object} kubeconfig Cluster's kubeconfig object
  * @param {String} apiVersion Specify that the client should be for a particular application group
- *                            and version. Useful avoid having to check for different API versions and
- *                            customizing the called route for each version.
+ *                            and version. Useful to pre-build the request object past the version
+ *                            part.
  * @return {Object} Promise
  */
 module.exports.getKubernetesClient = async (kubeconfig, apiVersion) => {
 	const kubeconfigCopy = JSON.parse(JSON.stringify(kubeconfig));
 
-	const configObj = K8sConfig.fromKubeconfig(kubeconfigCopy);
-	const client = new K8sClient({config: configObj});
+	const k8sLibConfig = K8sConfig.fromKubeconfig(kubeconfigCopy);
+	const client = new K8sClient({config: k8sLibConfig});
 
 	try {
 		await client.loadSpec();
@@ -135,7 +127,9 @@ module.exports.getKubernetesClient = async (kubeconfig, apiVersion) => {
 		else if (verSplit.length === 2) {
 			return client.apis[verSplit[0]][verSplit[1]];
 		} else {
-			return null;
+			const err = new Error(`Version string '${apiVersion}' is invalid, should be e.g. batch/v1beta1`);
+			err.statusCode = 400;
+			throw err;
 		}
 	}
 
@@ -148,7 +142,7 @@ module.exports.getKubernetesClient = async (kubeconfig, apiVersion) => {
  * @param {String} newDefault Namespace in the cluster to use by default
  * @returns {void}
  */
-module.exports.changeDefaultNamespace = function(newDefault) {
+module.exports.changeDefaultNamespace = (newDefault) => {
 	if (newDefault && typeof(newDefault) === 'string') defaultNamespace = newDefault;
 };
 
@@ -158,7 +152,7 @@ module.exports.changeDefaultNamespace = function(newDefault) {
  * @param {Object} kubeconfig Kubeconfig object for the cluster
  * @returns Promise
  */
-module.exports.getVersion = function (kubeconfig) {
+module.exports.getVersion = (kubeconfig) => {
 	if (!kubeconfig || typeof(kubeconfig) !== 'object') {
 		const err = new Error('\'kubeconfig\' parameter must be an object');
 		err.status = 400;
@@ -264,7 +258,7 @@ module.exports.get = async (kubeconfig, namespace, resourceType, resourceName, o
  * @returns Promise
  */
 module.exports.logs = async (kubeconfig, namespace, resourceName, options) => {
-	const reqChain = await this.buildChain(kubeconfig, namespace, 'pod', resourceName, options);
+	const reqChain = await this.buildChain(kubeconfig, namespace, 'pod', resourceName);
 	return reqChain.log.get(options);
 };
 
@@ -295,8 +289,9 @@ module.exports.delete = async (kubeconfig, namespace, resourceType, resourceName
 module.exports.updateOrCreate = async (kubeconfig, resourceSpec) => {
 	const namespace = resourceSpec.metadata.namespace;
 	const resourceType = resourceSpec.kind.toLowerCase();
-	const reqChain = await this.buildChain(kubeconfig, namespace, resourceType);
-	return reqChain(resourceSpec.metadata.name).patch({
+	const resourceName = resourceSpec.metadata.name;
+	const reqChain = await this.buildChain(kubeconfig, namespace, resourceType, resourceName);
+	return reqChain.patch({
 		headers: {
 			'content-type': 'application/merge-patch+json'
 		},
@@ -310,14 +305,18 @@ module.exports.updateOrCreate = async (kubeconfig, resourceSpec) => {
 	});
 };
 
+/**
+ * Creates a spec for a Docker secret using the given repository and
+ * account information.
+ *
+ * @param {String} secretName Name of the docker secret
+ * @param {String} namespace Namespace the secret should be placed in
+ * @param {String} repositoryURL Endpoint for the Docker repository
+ * @param {String} dockerUsername Username for the repository account to use
+ * @param {String} dockerPassword Password for the repository account to use
+ * @returns JSON object containing a Docker secret spec
+ */
 module.exports.buildDockerSecret = (secretName, namespace, repositoryURL, dockerUsername, dockerPassword) => {
-	const secretJSON = {
-		kind: 'Secret',
-		metadata: {},
-		data: {},
-		type: 'kubernetes.io/dockerconfigjson'
-	};
-
 	const rawAuthToken = `${dockerUsername}:${dockerPassword}`;
 	const b64AuthToken = new Buffer(rawAuthToken).toString('base64');
 	const authObj = {
@@ -326,23 +325,39 @@ module.exports.buildDockerSecret = (secretName, namespace, repositoryURL, docker
 	authObj.auths[repositoryURL] = {
 		auth: b64AuthToken
 	};
-
 	const rawAuthString = JSON.stringify(authObj);
 	const b64AuthString = new Buffer(rawAuthString).toString('base64');
 
-	secretJSON.metadata.name = secretName;
-	secretJSON.metadata.namespace = namespace || 'default';
-	secretJSON.data['.dockerconfigjson'] = b64AuthString;
-
-	return secretJSON;
-};
-
-module.exports.buildGenericSecret = (secretName, namespace, secret) => {
 	const secretJSON = {
 		kind: 'Secret',
 		metadata: {
 			name: secretName,
-			namespace
+			namespace: namespace || defaultNamespace
+		},
+		data: {
+			'.dockerconfigjson': b64AuthString
+		},
+		type: 'kubernetes.io/dockerconfigjson'
+	};
+
+	return secretJSON;
+};
+
+/**
+ * Creates a spec for an opaque secret using the given repository and
+ * account information.
+ *
+ * @param {String} secretName Name of the docker secret
+ * @param {String} namespace Namespace the secret should be placed in
+ * @param {Object} secret Object containing secret data
+ * @returns JSON object containing an opaque secret spec
+ */
+module.exports.buildOpaqueSecret = (secretName, namespace, secret) => {
+	const secretJSON = {
+		kind: 'Secret',
+		metadata: {
+			name: secretName,
+			namespace: namespace || defaultNamespace
 		},
 		data: secret,
 		type: 'Opaque'
@@ -351,6 +366,15 @@ module.exports.buildGenericSecret = (secretName, namespace, secret) => {
 	return secretJSON;
 };
 
+/**
+ * Creates a spec for a TLS secret using the given certs.
+ *
+ * @param {String} secretName Name of the docker secret
+ * @param {String} namespace Namespace the secret should be placed in
+ * @param {String} tlsKey Private TLS key
+ * @param {String} tlsCert Public TLS cert
+ * @returns JSON object containing a TLS secret spec
+ */
 module.exports.buildTLSSecret = (secretName, namespace, tlsKey, tlsCert) => {
 	const secretJSON = {
 		kind: 'Secret',

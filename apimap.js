@@ -88,12 +88,14 @@ function compareAPIVersions (ver1, ver2) {
 
 /**
  * Given a cluster version (e.g. '1.7', '1.8') and a resource type (e.g. 'pod', 'deployment'),
- * returns the API group to use for that resource.
+ * returns the API group to use for that resource, or all the resources if only the version
+ * is provided.
  *
  * @param {String} clusterVersion Version of the cluster to determine an API group of
- * @param {String} resourceType Type of the resource whose API group is being determined
- * @returns String representing the API group or undefined if the input is malformed
- *          or such an API group has not been mapped yet.
+ * @param {String} resourceType (Optional )Type of the resource whose API group is being determined
+ * @returns {Object} Contains info about the API group, such as its version string and whether
+ *                   or not it's namespaced; returns all the resource info objects in the
+ *                   cluster if only the cluster version is provided.
  */
 module.exports.getGroupInfo = function (clusterVersion, resourceType) {
 	if (!clusterVersion || typeof(clusterVersion) !== 'string') return undefined;
@@ -110,7 +112,7 @@ module.exports.getGroupInfo = function (clusterVersion, resourceType) {
 				apiGroupInfo = apiMaps[clusterVersion][resourceType + 's'];
 			}
 
-			return apiGroupInfo;
+			return apiMaps[clusterVersion];
 		}
 	}
 
@@ -120,7 +122,7 @@ module.exports.getGroupInfo = function (clusterVersion, resourceType) {
 /**
  * Maps cluster resources to cluster API endpoints.
  *
- * @param {Object} cluster Cluster object from the cluster manager
+ * @param {Object} kubeconfig Kubeconfig representing the cluster
  * @returns Promise that ALWAYS resolves with two parameters: (errs, map). The reason
  *          the promise always resolves is that way we can attempt to map as may APIs
  *          as possible while still handling and returning errors caused by trying to
