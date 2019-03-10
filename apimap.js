@@ -112,7 +112,12 @@ module.exports.getGroupInfo = function (clusterVersion, resourceType) {
 				apiGroupInfo = apiMaps[clusterVersion][resourceType + 's'];
 			}
 
-			return apiMaps[clusterVersion];
+			// Give up and send the whole thing
+			if (!apiGroupInfo) {
+				apiGroupInfo = apiMaps[clusterVersion];
+			}
+
+			return apiGroupInfo;
 		}
 	}
 
