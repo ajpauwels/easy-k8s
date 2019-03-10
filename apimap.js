@@ -142,7 +142,7 @@ module.exports.buildAPIMap = function (kubeconfig) {
 	return Client.getVersion(kubeconfig)
 		.then((version) => {
 			clusterVer = Utils.prettifyVersion(version.gitVersion, 2);
-			const contextContainer = Utils.extractCurrentContext(kubeconfig);
+			const contextContainer = Client.extractCurrentContext(kubeconfig);
 			const clusterDescription = contextContainer.cluster;
 			serverBaseURL = Utils.removeTrailingSlash(clusterDescription.cluster.server);
 			const certBuf = Buffer.from(clusterDescription.cluster['certificate-authority-data'], 'base64');
