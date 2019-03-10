@@ -1,6 +1,7 @@
 # easy-k8s
 
-As the name implies, this library tries to simplify the process of interfacing a nodejs app with a Kubernetes cluster.
+As the name implies, this library tries to simplify the process of interfacing a nodejs app with a 
+Kubernetes cluster.
 
 All it needs are a Kubeconfig in order to perform the following operations:
 - Get resource(s)
@@ -8,16 +9,43 @@ All it needs are a Kubeconfig in order to perform the following operations:
 - Update or create resource
 - Delete resource
 
-Any operations not included in this list can be accomplished by simply grabbing an open-ended
-request chain from the library for the resource that you want and completing it.
+The library handles API discovery and resource versioning. It will always try to use the preferred API 
+version for any resource based on the cluster's k8s version.
 
-It simply builds on top of GoDaddy's excellent [kubernetes-client](https://github.com/godaddy/kubernetes-client "kubernetes-client") to abstract out the hassle of building request chains and worrying about supporting different cluster versions.
+It simply builds on top of GoDaddy's excellent 
+[kubernetes-client](https://github.com/godaddy/kubernetes-client "kubernetes-client") to abstract out the 
+hassle of building the request chain for your resource, e.g. 
+/apis/apps/v1/namespaces/mynamespace/deployments/my-deployment.
 
-Namely, the library will automatically map resource names (e.g. 'deployment') to a preferred resource version (e.g. 'apps/v1') for every cluster version (e.g. '1.13') that it encounters. This mapping is cached for later use.
+When it receives a kubeconfig, it will ping the cluster to know its version. From there, it checks to see
+if it has encountered a cluster of that version before. If not, it will perform API mapping/versioning on
+it. If it has, it will simply pull the map it has from its memory cache.
+
+The API mapping component provides a map of resource names -> preferred API version (e.g. apps/v1, rbac.authorization.k8s.io/v1, v1 by itself for the core API set) and whether or not that resource is namespaced.
+
+For example, the key in the map could be 'clusterroles', and the value at that key would be an object with
+value:
+```json
+{
+	"version": "rbac.authorization.k8s.io/v1",
+	"namespaced": false
+}
+```
+
+All of this is done automagically in the background by requesting all of this information from the cluster.
 
 # usage
 
 ## Get a resource
+`async function get(kubeconfig, namespace, resourceType, resourceName, options)`
+- `kubeconfig`: Kubeconfig object with current-context pointing to context for correct cluster
+- `namespace`: (Optional) Namespace the resource is in, can be falsy to use the default namespace or 'all'
+               to target all namespaces. Leave falsy if the resource is not namespaced at all.
+- `resourceType`: Type of the resource to retrieve, can be singular or plural
+- `resourceName`: (Optional) Non-falsy to specify a specific resource to get
+- `options`: (Optional) Pass options to get command
+
+### Example
 ```javascript
 const K8s = require('easy-k8s');
 
@@ -29,6 +57,14 @@ const allPodSpecs = await K8s.get(kubeconfig, 'all', 'pod');
 ```
 
 ## Get container logs
+`async function(kubeconfig, namespace, resourceName, options)`
+- `kubeconfig`: Kubeconfig object with current-context pointing to context for correct cluster
+- `namespace`: (Optional) Namespace the resource is in, can be falsy to use the default namespace or 'all'
+               to target all namespaces. Leave falsy if the resource is not namespaced at all.
+- `resourceName`: (Optional) Non-falsy to specify a specific resource to get
+- `options`: (Optional) Pass options to get command
+
+### Example
 ```javascript
 const K8s = require('easy-k8s');
 
@@ -38,6 +74,14 @@ const podSpec = await K8s.logs(kubeconfig, 'mynamespace', 'my-pod');
 ```
 
 ## Update or create a resource
+`async function(kubeconfig, resourceSpec)`
+- `kubeconfig`: Kubeconfig object with current-context pointing to context for correct cluster
+- `resourceSpec`: Kubernetes spec for a resource that is being created or updated. When the resource is
+being updated, this does not have to be a complete reproduction of that resource spec with the changes
+wanted. It can simply contain the fields that need to be changed or added. A merge patch is done with the
+upstream resource.
+
+### Example
 ```javascript
 const K8s = require('easy-k8s');
 
@@ -53,6 +97,15 @@ const podSpec = await K8s.updateOrCreate(kubeconfig, newDeploymentSpec);
 ```
 
 ## Delete a resource
+`async function(kubeconfig, namespace, resourceType, resourceName, options)`
+- `kubeconfig`: Kubeconfig object with current-context pointing to context for correct cluster
+- `namespace`: (Optional) Namespace the resource is in, can be falsy to use the default namespace or 'all'
+               to target all namespaces. Leave falsy if the resource is not namespaced at all.
+- `resourceType`: Type of the resource to retrieve, can be singular or plural
+- `resourceName`: (Optional) Non-falsy to specify a specific resource to get
+- `options`: (Optional) Pass options to get command
+
+### Example
 ```javascript
 const K8s = require('easy-k8s');
 
@@ -80,9 +133,31 @@ const podSpec = await K8s.get(kubeconfig, 'mynamespace', 'pod', 'my-pod', {
 
 ## Retrieve an open-ended request chain to perform custom operations
 
-You can retrieve a request chain that is either completely untouched and simply connected to your
-cluster, all the way to one that has the resource type, version, namespace, and name pre-loaded
-into it.
+The util functions listed above are meant to encompass the majority of the operations performed on a 
+cluster. If you'd like to use the API discovery/versioning features of this lib with an operation not 
+encompassed by the util functions, you can use the `buildChain(kubeconfig, namespace, resourceType, 
+resourceName)` function. All parameters except for `kubeconfig` are optional. It will build out the chain/
+API call to whichever level of detail you provide.
+
+For example, if only the kubeconfig is provided, the resulting client will be bare, equivalent to just /.
+You would then have to build the chain yourself, including the API type and version, namespace, and name
+of the resource.
+
+If just a namespace is provided, you'll get the same as the above as a namespace is only meaningful when
+paired with `resourceType`.
+
+If a namespace and a resource type are provided, the chain would be built to that level of details:
+/apis/apps/v1/namespace/mynamespace/deployment
+/api/v1/namespace/mynamespace/pod
+
+If the namespace is omitted, it is also omitted from the chain (this is also valid for resources which are
+not namespaced in the first place):
+/apis/rbac.authorization.k8s.io/v1/roles
+/apis/rbac.authorization.k8s.io/v1/clusterroles
+
+Finally, if the resourceName is provided, it will add that to the final chain as well. Like the namespace
+parameter, this parameter is only meaningful if `resourceType` is provided:
+/api/v1/namespace/mynamespace/service/my-service
 
 ```javascript
 const K8s = require('easy-k8s');

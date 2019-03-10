@@ -191,38 +191,48 @@ module.exports.getVersion = (kubeconfig) => {
  * @returns K8s lib request chain ready for making request
  */
 module.exports.buildChain = async (kubeconfig, namespace, resourceType, resourceName) => {
-	resourceType = resourceType.toLowerCase();
+	if (!kubeconfig || typeof(kubeconfig) !== 'object') {
+		const err = new Error('Missing kubeconfig, must be an object');
+		err.statusCode = 400;
+		throw err;
+	}
+	if (resourceType) resourceType = resourceType.toLowerCase();
 
 	// Cluster version defines which API group we'll use
 	const verResp = await this.getVersion(kubeconfig);
 	const clusterVer = Utils.prettifyVersion(verResp.gitVersion, 2);
 
 	// Get the API group for the resource
-	let apiGroupInfo = APIMap.getGroupInfo(clusterVer, resourceType);
-	if (!apiGroupInfo) {
-		await APIMap.buildAPIMap(kubeconfig);
-	}
-	apiGroupInfo = APIMap.getGroupInfo(clusterVer, resourceType);
-	if (!apiGroupInfo) {
-		const err = new Error(`Could not get API group info for resource '${resourceType}' in cluster with k8s version '${clusterVer}'`);
-		err.statusCode = 500;
-		throw err;
+	let apiVersion, namespaced;
+	if (resourceType && typeof(resourceType) === 'string') {
+		let apiGroupInfo = APIMap.getGroupInfo(clusterVer, resourceType);
+		if (!apiGroupInfo) {
+			await APIMap.buildAPIMap(kubeconfig);
+		}
+		apiGroupInfo = APIMap.getGroupInfo(clusterVer, resourceType);
+		if (!apiGroupInfo) {
+			const err = new Error(`Could not get API group info for resource '${resourceType}' in cluster with k8s version '${clusterVer}'`);
+			err.statusCode = 500;
+			throw err;
+		}
+		apiVersion = apiGroupInfo.version;
+		namespaced = apiGroupInfo.namespaced;
 	}
 
 	// Get the client to communicate with the cluster
-	const client = await this.getKubernetesClient(kubeconfig, apiGroupInfo.version);
+	const client = await this.getKubernetesClient(kubeconfig, apiVersion);
 
 	// Chain is built progressively to allow for flexible namespacing and resource naming
 	let reqChain = client;
 
-	if (apiGroupInfo.namespaced && namespace !== 'all') {
+	if (namespaced && namespace !== 'all' && resourceType && apiVersion) {
 		if (!namespace || typeof(namespace) !== 'string') namespace = defaultNamespace;
 		reqChain = reqChain.namespaces(namespace);
 	}
 
 	reqChain = reqChain[resourceType];
 
-	if (resourceName && typeof(resourceName) === 'string') {
+	if (resourceName && typeof(resourceName) === 'string' && resourceType && apiVersion) {
 		reqChain = reqChain(resourceName);
 	}
 
@@ -232,7 +242,7 @@ module.exports.buildChain = async (kubeconfig, namespace, resourceType, resource
 /**
  * Gets the desired resource from the cluster.
  *
- * @param {Object} cluster Cluster object from cluster manager
+ * @param {Object} kubeconfig Kubeconfig object with current-context pointing to context for correct cluster
  * @param {String} namespace (Optional) Namespace the resource is in, can be falsy to use the default
  *                           namespace or 'all' to target all namespaces. Leave falsy if the
  *                           resource is not namespaced at all.
@@ -249,7 +259,7 @@ module.exports.get = async (kubeconfig, namespace, resourceType, resourceName, o
 /**
  * Gets the desired logs from the cluster pod container.
  *
- * @param {Object} kubeconfig Cluster object from cluster manager
+ * @param {Object} kubeconfig Kubeconfig object with current-context pointing to context for correct cluster
  * @param {String} namespace (Optional) Namespace the resource is in, can be falsy to use the default
  *                           namespace or 'all' to target all namespaces. Leave falsy if the
  *                           resource is not namespaced at all.
@@ -265,7 +275,7 @@ module.exports.logs = async (kubeconfig, namespace, resourceName, options) => {
 /**
  * Deletes the given resource from the cluster.
  *
- * @param {Object} kubeconfig Cluster's kubeconfig object
+ * @param {Object} kubeconfig Kubeconfig object with current-context pointing to context for correct cluster
  * @param {String} namespace (Optional) Namespace the resource is in, can be falsy to use the default
  *                           namespace or 'all' to target all namespaces. Leave falsy if the
  *                           resource is not namespaced at all.
@@ -282,7 +292,7 @@ module.exports.delete = async (kubeconfig, namespace, resourceType, resourceName
 /**
  * Updates or creates the given resource in the cluster.
  *
- * @param {Object} kubeconfig Cluster's kubeconfig object
+ * @param {Object} kubeconfig Kubeconfig object with current-context pointing to context for correct cluster
  * @param {Object} resourceSpec Kubernetes specification file for the resource
  * @returns Promise
  */
