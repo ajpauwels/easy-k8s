@@ -47,7 +47,7 @@ All of this is done automagically in the background by requesting all of this in
 
 ### Example
 ```javascript
-const K8s = require('easy-k8s');
+const K8s = require('easy-k8s').Client;
 
 // Load a kubeconfig, either from a file or pulled from some other data store
 const kubeconfig = { ... };
@@ -66,7 +66,7 @@ const allPodSpecs = await K8s.get(kubeconfig, 'all', 'pod');
 
 ### Example
 ```javascript
-const K8s = require('easy-k8s');
+const K8s = require('easy-k8s').Client;
 
 // Load a kubeconfig, either from a file or pulled from some other data store
 const kubeconfig = { ... };
@@ -83,7 +83,7 @@ upstream resource.
 
 ### Example
 ```javascript
-const K8s = require('easy-k8s');
+const K8s = require('easy-k8s').Client;
 
 // Load a kubeconfig, either from a file or pulled from some other data store
 const kubeconfig = { ... };
@@ -107,7 +107,7 @@ const podSpec = await K8s.updateOrCreate(kubeconfig, newDeploymentSpec);
 
 ### Example
 ```javascript
-const K8s = require('easy-k8s');
+const K8s = require('easy-k8s').Client;
 
 // Load a kubeconfig, either from a file or pulled from some other data store
 const kubeconfig = { ... };
@@ -121,7 +121,7 @@ All requests accept a final `options` parameter containing variables that will b
 into the HTTP request.
 
 ```javascript
-const K8s = require('easy-k8s');
+const K8s = require('easy-k8s').Client;
 
 // Load a kubeconfig, either from a file or pulled from some other data store
 const kubeconfig = { ... };
@@ -160,7 +160,7 @@ parameter, this parameter is only meaningful if `resourceType` is provided:
 /api/v1/namespace/mynamespace/service/my-service
 
 ```javascript
-const K8s = require('easy-k8s');
+const K8s = require('easy-k8s').Client;
 
 // Load a kubeconfig, either from a file or pulled from some other data store
 const kubeconfig = { ... };
@@ -178,12 +178,12 @@ const deploymentSpecFromClient = await client['apps']['v1'].namespace('mynamespa
 ```
 
 ## Other util functions
-- `K8s.extractCurrentContext(kubeconfig)`: Returns an object with the `{ context, cluster, user }`
+- `Utils.extractCurrentContext(kubeconfig)`: Returns an object with the `{ context, cluster, user }`
   for the `current-context` in that kubeconfig.
-- `K8s.getVersion(kubeconfig)`: Returns the version object for the cluster.
-- `K8s.buildDockerSecret(secretName, namespace, repositoryURL, dockerUsername, dockerPassword)`: 
+- `Client.getVersion(kubeconfig)`: Returns the version object for the cluster.
+- `Client.buildDockerSecret(secretName, namespace, repositoryURL, dockerUsername, dockerPassword)`: 
    Returns a Docker secret spec for the given Docker registry.
-- `K8s.buildOpaqueSecret(secretName, namespace, secret)`: Returns an opaque secret spec containing
+- `Client.buildOpaqueSecret(secretName, namespace, secret)`: Returns an opaque secret spec containing
   the given secret data.
-- `K8s.buildTLSSecret(secretName, namespace, tlsKey, tlsCert)`: Returns a TLS secret spec for the
+- `Client.buildTLSSecret(secretName, namespace, tlsKey, tlsCert)`: Returns a TLS secret spec for the
   given TLS key and cert.
