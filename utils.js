@@ -1,43 +1,68 @@
 /**
- * Converts an axios error into a standard error
- * with status code and a message. Also attaches any
- * data passed as a response as error metadata field.
+ * Get context and cluster from current context.
  *
- * @param {Object} axiosErr Error given by an axios call
- * @returns {Object} Standard Error object with additional
- *                   'statusCode' and 'metadata' fields
+ * @param {Object} kubeconfigFile Cluster's kubeconfig file
+ * @returns {Object} Object contains:
+ *                   {
+ *                       context: { ... },
+ *                       cluster: { ... }
+ *                   }
  */
-module.exports.axiosHandler = (axiosErr) => {
-	const res = axiosErr.response;
+module.exports.extractCurrentContext = (kubeconfigFile) => {
+	if (!kubeconfigFile || typeof(kubeconfigFile) !== 'object') return undefined;
 
-	if (res) {
-		const statusCode = res.status;
-		const message = res.statusText;
-
-		const err = new Error(message);
-		err.statusCode = statusCode;
-		err.metadata = res.data;
-		return err;
-	} else {
-		const err = new Error(axiosErr.message);
-		err.stack = axiosErr.stack;
-		err.statusCode = 500;
-
-		return err;
+	const currentContextName = kubeconfigFile['current-context'];
+	if (!currentContextName) {
+		return undefined;
 	}
-};
 
-/**
- * If there's a trailing slash at the end of the URL, it is removed.
- * Otherwise, the string is returned untouched.
- *
- * @param {String} url URL to remove the trailing slash from
- * @returns {String} URL with the removed slash
- */
-module.exports.removeTrailingSlash = function (url) {
-	if (url[url.length - 1] === '/') url.substr(0, url.length - 1);
+	const contexts = kubeconfigFile.contexts;
+	let context;
+	if (Array.isArray(contexts) && contexts.length > 0) {
+		for (const c of contexts) {
+			if (c.name === currentContextName) {
+				context = c;
+				break;
+			}
+		}
+	}
 
-	return url;
+	if (!context) {
+		return undefined;
+	}
+
+	const clusterName = context.context.cluster;
+
+	let cluster;
+	const clusters = kubeconfigFile.clusters;
+	if (Array.isArray(clusters) && clusters.length > 0) {
+		for (const c of clusters) {
+			if (c.name === clusterName) {
+				cluster = c;
+				break;
+
+			}
+		}
+	}
+
+	const userName = context.context.user;
+
+	let user;
+	const users = kubeconfigFile.users;
+	if (Array.isArray(users) && users.length > 0) {
+		for (const u of users) {
+			if (u.name === userName) {
+				user = u;
+				break;
+			}
+		}
+	}
+
+	return {
+		cluster,
+		context,
+		user
+	};
 };
 
 /**

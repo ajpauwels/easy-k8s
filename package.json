@@ -2,7 +2,7 @@
 	"name": "easy-k8s",
 	"version": "1.0.8",
 	"description": "Wrapper lib for kubernetes-client that provides cluster API version management/mapping and a couple util functions to simplify the request building process.",
-	"main": "client.js",
+	"main": "app.js",
 	"engines": {
 		"node": "^10.15.3"
 	},
@@ -25,7 +25,6 @@
 	},
 	"homepage": "https://github.com/ajpauwels/easy-k8s#readme",
 	"dependencies": {
-		"axios": "^0.18.0",
 		"kubernetes-client": "^6.11.0"
 	}
 }

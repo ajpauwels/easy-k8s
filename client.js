@@ -1,6 +1,4 @@
 // Third-party libs
-const axios = require('axios');
-const https = require('https');
 const Kubernetes = require('kubernetes-client');
 const K8sClient = Kubernetes.Client;
 const K8sConfig = Kubernetes.config;
@@ -8,76 +6,10 @@ const K8sConfig = Kubernetes.config;
 // Local libs
 const APIMap = require('./apimap');
 const Utils = require('./utils');
+const Request = require('./request');
 
 // Default namespace is used when a request for a namespaced resource is made but no namespace is provided
 let defaultNamespace = 'default';
-
-/**
- * Get context and cluster from current context.
- *
- * @param {Object} kubeconfigFile Cluster's kubeconfig file
- * @returns {Object} Object contains:
- *                   {
- *                       context: { ... },
- *                       cluster: { ... }
- *                   }
- */
-module.exports.extractCurrentContext = (kubeconfigFile) => {
-	if (!kubeconfigFile || typeof(kubeconfigFile) !== 'object') return undefined;
-
-	const currentContextName = kubeconfigFile['current-context'];
-	if (!currentContextName) {
-		return undefined;
-	}
-
-	const contexts = kubeconfigFile.contexts;
-	let context;
-	if (Array.isArray(contexts) && contexts.length > 0) {
-		for (const c of contexts) {
-			if (c.name === currentContextName) {
-				context = c;
-				break;
-			}
-		}
-	}
-
-	if (!context) {
-		return undefined;
-	}
-
-	const clusterName = context.context.cluster;
-
-	let cluster;
-	const clusters = kubeconfigFile.clusters;
-	if (Array.isArray(clusters) && clusters.length > 0) {
-		for (const c of clusters) {
-			if (c.name === clusterName) {
-				cluster = c;
-				break;
-
-			}
-		}
-	}
-
-	const userName = context.context.user;
-
-	let user;
-	const users = kubeconfigFile.users;
-	if (Array.isArray(users) && users.length > 0) {
-		for (const u of users) {
-			if (u.name === userName) {
-				user = u;
-				break;
-			}
-		}
-	}
-
-	return {
-		cluster,
-		context,
-		user
-	};
-};
 
 /**
  * Creates a Kubernetes client which can be used to communicate with the
@@ -159,23 +91,10 @@ module.exports.getVersion = (kubeconfig) => {
 		throw err;
 	}
 
-	const currentContext = this.extractCurrentContext(kubeconfig);
-	const ip = currentContext.cluster.cluster.server;
-	const url = `${ip}${ip[ip.length - 1] !== '/' ? '/' : ''}version`;
-
-	const certBuf = Buffer.from(currentContext.cluster.cluster['certificate-authority-data'], 'base64');
-	const options = {
-		httpsAgent: new https.Agent({
-			ca: certBuf.toString('utf-8')
-		})
-	};
-
-	return axios.get(url, options)
-		.then((resp) => {
-			return resp.data;
-		})
-		.catch((err) => {
-			throw Utils.axiosHandler(err);
+	return Request.cluster(kubeconfig, 'get', '/version')
+		.then((res) => {
+			Request.parseStatus(res, new Error());
+			return res.body;
 		});
 };
 

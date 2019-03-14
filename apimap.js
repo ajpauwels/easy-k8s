@@ -1,8 +1,8 @@
-// Third-party modules
-const axios = require('axios');
+// Third-party libs
 const https = require('https');
 
 // Local libs
+const Request = require('./request');
 const Utils = require('./utils');
 const Client = require('./client');
 
@@ -63,6 +63,9 @@ function mapGroupResources (clusterVer, resourcesResp, preferredGroupVer) {
  *          and > 0 if ver 1 is a greater version than ver2
  */
 function compareAPIVersions (ver1, ver2) {
+	if (ver1 && !ver2) return 1;
+	else if (!ver1 && ver2) return -1;
+	else if (!ver1 && !ver2) return 0;
 	const verRegex = /([a-z]+)([0-9]+)([a-z]+)?([0-9]+)?/;
 	const ver1Extraction = verRegex.exec(ver1);
 	const ver2Extraction = verRegex.exec(ver2);
@@ -79,6 +82,8 @@ function compareAPIVersions (ver1, ver2) {
 
 	if (ver1MinorStr === 'beta' && ver2MinorStr === 'alpha') return 1;
 	else if (ver1MinorStr === 'alpha' && ver2MinorStr === 'beta') return -1;
+	else if (ver1MinorStr && !ver2MinorStr) return -1;
+	else if (!ver1MinorStr && ver2MinorStr) return 1;
 
 	if (ver1Minor > ver2Minor) return 1;
 	else if (ver1Minor < ver2Minor) return -1;
@@ -133,7 +138,7 @@ module.exports.getGroupInfo = function (clusterVersion, resourceType) {
  *          as possible while still handling and returning errors caused by trying to
  *          map some other part of the API.
  */
-module.exports.buildAPIMap = function (kubeconfig) {
+module.exports.buildAPIMap = async (kubeconfig) => {
 	if (!kubeconfig || typeof(kubeconfig) !== 'object') {
 		const err = new Error('Invalid \'kubeconfig\' object given');
 		err.status = 400;
@@ -143,51 +148,46 @@ module.exports.buildAPIMap = function (kubeconfig) {
 	const groupReqs = [];
 	const errs = [];
 
-	let clusterVer, serverBaseURL, httpsAgent;
-	return Client.getVersion(kubeconfig)
-		.then((version) => {
-			clusterVer = Utils.prettifyVersion(version.gitVersion, 2);
-			const contextContainer = Client.extractCurrentContext(kubeconfig);
-			const clusterDescription = contextContainer.cluster;
-			serverBaseURL = Utils.removeTrailingSlash(clusterDescription.cluster.server);
-			const certBuf = Buffer.from(clusterDescription.cluster['certificate-authority-data'], 'base64');
-			httpsAgent = new https.Agent({
-				ca: certBuf.toString('utf-8')
-			});
+	const versionObj = await Client.getVersion(kubeconfig);
+	const clusterVer = Utils.prettifyVersion(versionObj.gitVersion, 2);
 
-			// Add the 'core' API group
-			const coreGroupReq = axios.get(`${serverBaseURL}/api/v1`, {httpsAgent}).then((resp) => {
-				return mapGroupResources(clusterVer, resp.data);
-			}).catch((err) => {
-				errs.push(Utils.axiosHandler(err));
-			});
+	// Add the 'core' API group
+	const coreGroupReq = Request.cluster(kubeconfig, 'get', '/api/v1').then((res) => {
+		Request.parseStatus(res, new Error());
+		return mapGroupResources(clusterVer, res.body);
+	}).catch((err) => {
+		errs.push(err);
+	});
+	groupReqs.push(coreGroupReq);
 
-			groupReqs.push(coreGroupReq);
+	// Add all other API groups
+	const apiGroups = await Request.cluster(kubeconfig, 'get', '/apis').then((res) => {
+		Request.parseStatus(res, new Error());
+		return res.body.groups;
+	}).catch((err) => {
+		errs.push(err);
+		return undefined;
+	});
+	
+	if (apiGroups) {
+		for (const group of apiGroups) {
+			const preferredGroupVer = group.preferredVersion.groupVersion;
 
-			// Add all other API groups
-			return axios.get(`${serverBaseURL}/apis`, {httpsAgent});
-		}).then((resp) => {
-			return resp.data.groups;
-		}).then((apiGroups) => {
-			for (const group of apiGroups) {
-				const preferredGroupVer = group.preferredVersion.groupVersion;
-
-				for (const version of group.versions) {
-					const groupReq = axios.get(`${serverBaseURL}/apis/${version.groupVersion}`, {httpsAgent}).then((resp) => {
-						return mapGroupResources(clusterVer, resp.data, preferredGroupVer);
-					}).catch((err) => {
-						errs.push(Utils.axiosHandler(err));
-					});
-
-					groupReqs.push(groupReq);
-				}
+			for (const version of group.versions) {
+				const groupReq = Request.cluster(kubeconfig, 'get', `/apis/${version.groupVersion}`).then((res) => {
+					Request.parseStatus(res, new Error());
+					return mapGroupResources(clusterVer, res.body, preferredGroupVer);
+				}).catch((err) => {
+					errs.push(err);
+					return undefined;
+				});
+				groupReqs.push(groupReq);
 			}
+		}
+	}
 
-			return Promise.all(groupReqs);
-		}).catch((err) => {
-			throw Utils.axiosHandler(err);
-		}).then(() => {
-			if (errs.length > 0) throw errs;
-			else return apiMaps[clusterVer];
-		});
+	return Promise.all(groupReqs).then(() => {
+		if (errs.length > 0) throw errs;
+		else return apiMaps[clusterVer];
+	});
 };
