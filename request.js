@@ -39,6 +39,11 @@ module.exports.clusterOptions = (kubeconfig, method, path) => {
 		});
 	}
 
+	const user = ctx.user;
+	if (user.user.username && user.user.password) {
+		baseOptions.auth = `${user.user.username}:${user.user.password}`;
+	}
+
 	return baseOptions;
 };
 
